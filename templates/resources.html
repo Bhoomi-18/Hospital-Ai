@@ -40,24 +40,9 @@
     {% endfor %}
   </div>
 
-  <!-- Shared room occupancy -->
-  <div class="card" style="margin-bottom:20px">
-    <div class="card-h"><span class="card-t">👥 Shared Room Occupancy</span></div>
-    <div class="card-b np" style="padding:12px 20px;">
-      <div style="display:flex;gap:12px;flex-wrap:wrap">
-        {% for room in shared_rooms %}
-        <div class="m-card" style="min-width:140px;padding:10px;">
-          <div style="font-size:12px;color:var(--text3);">{{ room.ward or 'Unknown Ward' }}</div>
-          <div style="font-size:16px;font-weight:700">{{ room.occupied }}/{{ room.total }}</div>
-          <div style="font-size:11px;color:var(--text2)">{{ room.available }} free</div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <!-- Beds by Type sections -->
+  <!-- Beds by Type sections (non-Shared) -->
   {% for btype, blist in bed_by_type.items() %}
+  {% if btype != 'Shared' %}
   <div class="card" style="margin-bottom:20px">
     <div class="card-h">
       <span class="card-t">{{ bed_icons.get(btype,'🛏️') }} {{ btype }} Beds</span>
@@ -87,7 +72,107 @@
       </div>
     </div>
   </div>
+  {% endif %}
   {% endfor %}
+
+  <!-- Shared Beds Section (grouped by room) -->
+  {% if bed_by_type.get('Shared') %}
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-h">
+      <span class="card-t">👥 Shared Rooms</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        {% set shared_list = bed_by_type['Shared'] %}
+        <span class="badge badge-s">{{ shared_list|selectattr('status','eq','Available')|list|length }} free</span>
+        <span class="badge badge-d">{{ shared_list|selectattr('status','eq','Occupied')|list|length }} occupied</span>
+        <span class="badge badge-p">{{ shared_list|length }} beds</span>
+        <button class="btn btn-sm btn-p" onclick="openAddBedModal('Shared')">+ Add</button>
+      </div>
+    </div>
+    <div class="card-b np" style="padding:16px 20px">
+      {% set ns = namespace(rooms={}) %}
+      {% for bed in shared_list %}
+        {% if bed.room_number not in ns.rooms %}
+          {% set _ = ns.rooms.update({bed.room_number: []}) %}
+        {% endif %}
+        {% set _ = ns.rooms[bed.room_number].append(bed) %}
+      {% endfor %}
+      {% for room_num, beds in ns.rooms.items() %}
+      <div style="margin-bottom:16px;border:1px solid var(--border);border-radius:10px;padding:14px;background:var(--bg-primary)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div>
+            <span style="font-weight:700;font-size:14px;color:var(--cyan)">🏠 Room {{ room_num }}</span>
+            <span class="badge badge-p" style="margin-left:8px">{{ beds[0].capacity }}-Bed Room</span>
+          </div>
+          <div style="display:flex;gap:6px">
+            <span class="mini-stat occ">{{ beds|selectattr('status','eq','Occupied')|list|length }} used</span>
+            <span class="mini-stat avail">{{ beds|selectattr('status','eq','Available')|list|length }} free</span>
+          </div>
+        </div>
+        <div class="bed-grid">
+          {% for bed in beds %}
+          <div class="bed-cell {{ 'bed-occupied' if bed.status=='Occupied' else 'bed-available' if bed.status=='Available' else 'bed-maint' }}"
+               onclick="openBedModal({{ bed.id }})" style="min-width:100px">
+            <div class="bed-code">{{ bed.bed_code }}</div>
+            <div class="bed-status-dot {{ 'dot-occ' if bed.status=='Occupied' else 'dot-avail' if bed.status=='Available' else 'dot-maint' }}"></div>
+            {% if bed.patient_name %}
+            <div class="bed-patient">{{ bed.patient_name }}</div>
+            {% else %}
+            <div class="bed-patient" style="color:var(--text3)">{{ bed.status }}</div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ── Emergency Beds Section (separate overflow) ── -->
+  <div class="card" style="margin-bottom:20px;border:2px solid {{ 'var(--red)' if general_full else 'var(--border)' }}">
+    <div class="card-h" style="background:{{ 'rgba(239,68,68,0.1)' if general_full else 'transparent' }}">
+      <span class="card-t">
+        🚨 Emergency Beds
+        {% if general_full %}
+        <span class="badge badge-d" style="margin-left:8px;animation:pulse 2s infinite">⚠ GENERAL WARD FULL — Emergency Activated</span>
+        {% else %}
+        <span class="badge badge-s" style="margin-left:8px">Standby</span>
+        {% endif %}
+      </span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <span class="mini-stat occ">{{ em_summ.occupied }} Occupied</span>
+        <span class="mini-stat avail">{{ em_summ.available }} Free</span>
+        <span class="badge badge-p">{{ em_summ.total }} total</span>
+        <button class="btn btn-sm btn-p" onclick="openAddBedModal('Emergency')">+ Add</button>
+      </div>
+    </div>
+    <div class="card-b np" style="padding:12px 20px">
+      {% if not general_full and em_summ.occupied == 0 %}
+      <div style="text-align:center;padding:24px;color:var(--text3)">
+        <div style="font-size:32px;margin-bottom:8px">🔒</div>
+        <div style="font-size:13px;font-weight:600">Emergency beds are on standby</div>
+        <div style="font-size:11px;margin-top:4px">These beds activate automatically when all General ward beds are occupied</div>
+      </div>
+      {% else %}
+      <div class="bed-grid">
+        {% for bed in emergency_beds %}
+        <div class="bed-cell {{ 'bed-occupied' if bed.status=='Occupied' else 'bed-available' if bed.status=='Available' else 'bed-maint' }}"
+             onclick="openBedModal({{ bed.id }})">
+          <div class="bed-code">{{ bed.bed_code }}</div>
+          <div class="bed-ward">{{ bed.ward or '—' }}</div>
+          <div class="bed-status-dot {{ 'dot-occ' if bed.status=='Occupied' else 'dot-avail' if bed.status=='Available' else 'dot-maint' }}"></div>
+          {% if bed.patient_name %}
+          <div class="bed-patient">{{ bed.patient_name }}</div>
+          <div class="bed-sev badge badge-{{ 'd' if bed.severity=='Critical' else 'w' if bed.severity=='Moderate' else 's' }}">{{ bed.severity }}</div>
+          {% else %}
+          <div class="bed-patient" style="color:var(--text3)">{{ bed.status }}</div>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
 </div>
 
 <!-- ══════════════════════════════════════════
@@ -495,126 +580,191 @@
 
 <!-- BED ADD MODAL -->
 <div class="modal-bg" id="addBedModal">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:540px">
     <div class="modal-h">
       <h3 id="addBedTitle">🛏️ Add Bed</h3>
       <button class="modal-x" onclick="closeModal('addBedModal')">&times;</button>
     </div>
-    <div class="modal-bd">
-      <form action="/resources/bed/add" method="POST">
+    <form action="/resources/bed/add" method="POST" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
+      <div class="modal-bd">
         <input type="hidden" name="bed_type" id="addBedType">
-        <label>Bed Code</label>
-        <input type="text" name="bed_code" required class="input" placeholder="e.g. ICU-01">
-        <label>Department</label>
-        <input type="number" name="department_id" class="input" required value="1">
-        <label>Ward</label>
-        <input type="text" name="ward" class="input" placeholder="e.g. Ward A">
-        <label>Floor</label>
-        <input type="number" name="floor" class="input" value="1">
-        <label>Notes</label>
-        <input type="text" name="notes" class="input">
-        <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-          <button type="submit" class="btn btn-p">Save Bed</button>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Bed Code</label>
+            <input type="text" name="bed_code" required class="fc" placeholder="e.g. ICU-01">
+          </div>
+          <div class="fg">
+            <label class="fl">Ward</label>
+            <input type="text" name="ward" class="fc" placeholder="e.g. Ward A">
+          </div>
         </div>
-      </form>
-    </div>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Department</label>
+            <select name="department_id" class="fc">
+              {% for d in depts %}
+              <option value="{{ d.id }}">{{ d.icon }} {{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="fg">
+            <label class="fl">Floor</label>
+            <input type="number" name="floor" class="fc" value="1" min="0">
+          </div>
+        </div>
+        <div class="fg">
+          <label class="fl">Notes</label>
+          <input type="text" name="notes" class="fc" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="modal-ft">
+        <button type="button" class="btn btn-s" onclick="closeModal('addBedModal')">Cancel</button>
+        <button type="submit" class="btn btn-p">✔ Save Bed</button>
+      </div>
+    </form>
   </div>
 </div>
 
 <!-- BLOOD ADD/EDIT MODAL -->
 <div class="modal-bg" id="bloodModal">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:560px">
     <div class="modal-h">
       <h3 id="bloodTitle">🩸 Blood Inventory</h3>
       <button class="modal-x" onclick="closeModal('bloodModal')">&times;</button>
     </div>
-    <div class="modal-bd">
-      <form id="bloodForm" action="/resources/blood/add" method="POST">
-        <div style="display:flex;gap:10px;margin-bottom:10px">
-            <div style="flex:1">
-                <label>Blood Group</label>
-                <input type="text" name="blood_group" id="b_group" class="input" required placeholder="A+">
-            </div>
-            <div style="flex:1">
-                <label>Component</label>
-                <input type="text" name="component" id="b_comp" class="input" required placeholder="Whole Blood">
-            </div>
+    <form id="bloodForm" action="/resources/blood/add" method="POST" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
+      <div class="modal-bd">
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Blood Group</label>
+            <select name="blood_group" id="b_group" class="fc" required>
+              <option value="">Select Group</option>
+              <option value="A+">A+</option><option value="A-">A−</option>
+              <option value="B+">B+</option><option value="B-">B−</option>
+              <option value="O+">O+</option><option value="O-">O−</option>
+              <option value="AB+">AB+</option><option value="AB-">AB−</option>
+            </select>
+          </div>
+          <div class="fg">
+            <label class="fl">Component</label>
+            <select name="component" id="b_comp" class="fc" required>
+              <option value="">Select Component</option>
+              <option>Whole Blood</option>
+              <option>RBC</option>
+              <option>Plasma</option>
+              <option>Platelets</option>
+              <option>FFP</option>
+            </select>
+          </div>
         </div>
-        <div style="display:flex;gap:10px;margin-bottom:10px">
-            <div style="flex:1">
-                <label>Total Units</label>
-                <input type="number" name="units_total" id="b_total" class="input" required value="0">
-            </div>
-            <div style="flex:1">
-                <label>Available Units</label>
-                <input type="number" name="units_available" id="b_avail" class="input" required value="0">
-            </div>
-            <div style="flex:1">
-                <label>Reserved Units</label>
-                <input type="number" name="units_reserved" id="b_resv" class="input" required value="0">
-            </div>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Total Units</label>
+            <input type="number" name="units_total" id="b_total" class="fc" required value="0" min="0">
+          </div>
+          <div class="fg">
+            <label class="fl">Available</label>
+            <input type="number" name="units_available" id="b_avail" class="fc" required value="0" min="0">
+          </div>
+          <div class="fg">
+            <label class="fl">Reserved</label>
+            <input type="number" name="units_reserved" id="b_resv" class="fc" required value="0" min="0">
+          </div>
         </div>
-        <label>Expiry Date</label>
-        <input type="date" name="expiry_date" id="b_exp" class="input">
-        <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-          <button type="submit" class="btn btn-p">Save</button>
+        <div class="fg">
+          <label class="fl">Expiry Date</label>
+          <input type="date" name="expiry_date" id="b_exp" class="fc">
         </div>
-      </form>
-    </div>
+      </div>
+      <div class="modal-ft">
+        <button type="button" class="btn btn-s" onclick="closeModal('bloodModal')">Cancel</button>
+        <button type="submit" class="btn btn-p">✔ Save Record</button>
+      </div>
+    </form>
   </div>
 </div>
 
-<!-- MOBILE ADD MODAL -->
+<!-- MOBILE EQUIPMENT ADD MODAL -->
 <div class="modal-bg" id="addMobileModal">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:540px">
     <div class="modal-h">
       <h3 id="addMobileTitle">📡 Add Mobile Equipment</h3>
       <button class="modal-x" onclick="closeModal('addMobileModal')">&times;</button>
     </div>
-    <div class="modal-bd">
-      <form action="/resources/mobile/add" method="POST">
+    <form action="/resources/mobile/add" method="POST" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
+      <div class="modal-bd">
         <input type="hidden" name="equipment_type" id="addMobileType">
-        <label>Asset Code</label>
-        <input type="text" name="asset_code" class="input" required placeholder="e.g. WC-001">
-        <label>Department</label>
-        <input type="number" name="department_id" class="input" required value="1">
-        <label>Location</label>
-        <input type="text" name="current_location" class="input" placeholder="e.g. Corridor A">
-        <label>Condition</label>
-        <select name="condition" class="input">
-            <option>Good</option>
-            <option>Fair</option>
-            <option>Poor</option>
-        </select>
-        <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-          <button type="submit" class="btn btn-p">Save Equipment</button>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Asset Code</label>
+            <input type="text" name="asset_code" class="fc" required placeholder="e.g. WC-001">
+          </div>
+          <div class="fg">
+            <label class="fl">Department</label>
+            <select name="department_id" class="fc">
+              {% for d in depts %}
+              <option value="{{ d.id }}">{{ d.icon }} {{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
         </div>
-      </form>
-    </div>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Location</label>
+            <input type="text" name="current_location" class="fc" placeholder="e.g. Corridor A">
+          </div>
+          <div class="fg">
+            <label class="fl">Condition</label>
+            <select name="condition" class="fc">
+              <option>Good</option>
+              <option>Fair</option>
+              <option>Poor</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div class="modal-ft">
+        <button type="button" class="btn btn-s" onclick="closeModal('addMobileModal')">Cancel</button>
+        <button type="submit" class="btn btn-p">✔ Save Equipment</button>
+      </div>
+    </form>
   </div>
 </div>
 
 <!-- LIFE SUPPORT ADD MODAL -->
 <div class="modal-bg" id="addLsModal">
-  <div class="modal" style="max-width:500px">
+  <div class="modal" style="max-width:540px">
     <div class="modal-h">
       <h3 id="addLsTitle">🫁 Add Life Support</h3>
       <button class="modal-x" onclick="closeModal('addLsModal')">&times;</button>
     </div>
-    <div class="modal-bd">
-      <form action="/resources/life_support/add" method="POST">
+    <form action="/resources/life_support/add" method="POST" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
+      <div class="modal-bd">
         <input type="hidden" name="equipment_type" id="addLsType">
-        <label>Asset Code</label>
-        <input type="text" name="asset_code" class="input" required placeholder="e.g. VENT-001">
-        <label>Department</label>
-        <input type="number" name="department_id" class="input" required value="1">
-        <label>Notes</label>
-        <input type="text" name="notes" class="input">
-        <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
-          <button type="submit" class="btn btn-p">Save Life Support</button>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Asset Code</label>
+            <input type="text" name="asset_code" class="fc" required placeholder="e.g. VENT-001">
+          </div>
+          <div class="fg">
+            <label class="fl">Department</label>
+            <select name="department_id" class="fc">
+              {% for d in depts %}
+              <option value="{{ d.id }}">{{ d.icon }} {{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
         </div>
-      </form>
-    </div>
+        <div class="fg">
+          <label class="fl">Notes</label>
+          <input type="text" name="notes" class="fc" placeholder="Optional notes">
+        </div>
+      </div>
+      <div class="modal-ft">
+        <button type="button" class="btn btn-s" onclick="closeModal('addLsModal')">Cancel</button>
+        <button type="submit" class="btn btn-p">✔ Save Life Support</button>
+      </div>
+    </form>
   </div>
 </div>
 
@@ -666,8 +816,8 @@ function openAddBloodModal() {
     let f = document.getElementById('bloodForm');
     f.reset();
     f.action = '/resources/blood/add';
-    document.getElementById('b_group').readOnly = false;
-    document.getElementById('b_comp').readOnly = false;
+    document.getElementById('b_group').disabled = false;
+    document.getElementById('b_comp').disabled = false;
     openModal('bloodModal');
 }
 function openEditBloodModal(id, grp, comp, tot, av, res, exp) {
@@ -675,9 +825,9 @@ function openEditBloodModal(id, grp, comp, tot, av, res, exp) {
     let f = document.getElementById('bloodForm');
     f.action = '/resources/blood/' + id + '/update';
     document.getElementById('b_group').value = grp;
-    document.getElementById('b_group').readOnly = true;
+    document.getElementById('b_group').disabled = true;
     document.getElementById('b_comp').value = comp;
-    document.getElementById('b_comp').readOnly = true;
+    document.getElementById('b_comp').disabled = true;
     document.getElementById('b_total').value = tot;
     document.getElementById('b_avail').value = av;
     document.getElementById('b_resv').value = res;
@@ -715,7 +865,15 @@ function openBedModal(bedId) {
           </div>
         </div>` : `<div class="empty" style="padding:20px"><div class="ei">✅</div><p>Bed is ${st}</p></div>`}
         ${bed.notes ? `<div class="detail-row"><span class="detail-lbl">Notes</span>${bed.notes}</div>` : ''}
-        <div style="font-size:10px;color:var(--text3);margin-top:8px">Last updated: ${(bed.last_updated||'').substring(0,16)}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">
+          <div style="font-size:10px;color:var(--text3)">Last updated: ${(bed.last_updated||'').substring(0,16)}</div>
+          ${(st === 'Available' || st === 'Maintenance') ? `
+          <form action="/resources/bed/${bed.id}/toggle_maintenance" method="POST" style="margin:0">
+            <button type="submit" class="btn btn-sm ${st === 'Maintenance' ? 'btn-s' : 'btn-w'}">
+              ${st === 'Maintenance' ? '✅ Restore to Available' : '🔧 Set to Maintenance'}
+            </button>
+          </form>` : ''}
+        </div>
       `;
       document.getElementById('bedModalTitle').textContent = '🛏️ ' + bed.bed_code;
       document.getElementById('bedModalBody').innerHTML = html;

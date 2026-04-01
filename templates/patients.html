@@ -103,12 +103,12 @@
 
 <!-- ── Add Patient Modal ── -->
 <div class="modal-bg" id="addPatient">
-  <div class="modal">
+  <div class="modal" style="max-width:600px">
     <div class="modal-h">
       <h3>➕ Admit Patient</h3>
       <button class="modal-x" onclick="closeModal('addPatient')">&times;</button>
     </div>
-    <form method="POST" action="/patients/add">
+    <form method="POST" action="/patients/add" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
       <div class="modal-bd">
         <div class="fr">
           <div class="fg">
@@ -215,12 +215,12 @@
 
 <!-- ── Edit Patient Modal ── -->
 <div class="modal-bg" id="editPatient">
-  <div class="modal">
+  <div class="modal" style="max-width:600px">
     <div class="modal-h">
       <h3>✏️ Edit Patient</h3>
       <button class="modal-x" onclick="closeModal('editPatient')">&times;</button>
     </div>
-    <form method="POST" id="editPatientForm" action="">
+    <form method="POST" id="editPatientForm" action="" style="display:flex;flex-direction:column;overflow:hidden;flex:1;min-height:0">
       <div class="modal-bd">
         <div class="fr">
           <div class="fg">

@@ -48,10 +48,12 @@ def create_db():
     c.execute("""CREATE TABLE IF NOT EXISTS beds (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bed_code TEXT UNIQUE NOT NULL,
-        bed_type TEXT NOT NULL,   -- ICU, General, Shared, Single, Deluxe
+        bed_type TEXT NOT NULL,   -- ICU, General, Shared, Single, Deluxe, Emergency
         department_id INTEGER,
         floor INTEGER DEFAULT 1,
         ward TEXT,
+        room_number TEXT,          -- for shared rooms grouping
+        capacity INTEGER DEFAULT 1,-- how many beds in this shared room
         status TEXT DEFAULT 'Available',  -- Available, Occupied, Maintenance, Reserved
         patient_id INTEGER,
         last_updated TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -209,6 +211,11 @@ def migrate_schema():
     if not has_column('patients', 'blood_units'):
         c.execute('ALTER TABLE patients ADD COLUMN blood_units INTEGER DEFAULT 0')
 
+    if not has_column('beds', 'room_number'):
+        c.execute("ALTER TABLE beds ADD COLUMN room_number TEXT")
+    if not has_column('beds', 'capacity'):
+        c.execute("ALTER TABLE beds ADD COLUMN capacity INTEGER DEFAULT 1")
+
     # Ensure app_settings exists if migrate called directly
     c.execute("""CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
@@ -267,15 +274,14 @@ def _seed(conn):
     # ── Beds ──
     bed_types = {
         'ICU':     [('ICU', 2, 'ICU Ward')],
-        'Emergency': [('General', 1, 'ER Bay'), ('Single', 1, 'Trauma Bay')],
-        'General Ward': [('Shared', 3, 'Ward A'), ('General', 3, 'Ward B'), ('Single', 3, 'Ward C'), ('Deluxe', 3, 'Suite')],
-        'Pediatrics': [('Shared', 2, 'Peds Ward'), ('Single', 2, 'Peds Private')],
+        'General Ward': [('General', 3, 'Ward B'), ('Single', 3, 'Ward C'), ('Deluxe', 3, 'Suite')],
+        'Pediatrics': [('Single', 2, 'Peds Private')],
         'Cardiology': [('Single', 4, 'Cardio Ward'), ('ICU', 4, 'CICU')],
         'Orthopedics': [('Single', 3, 'Ortho Ward'), ('General', 3, 'Ortho Bay')],
         'Neurology': [('Single', 4, 'Neuro Ward'), ('ICU', 4, 'NICU')],
         'Maternity': [('Single', 2, 'Labor & Delivery'), ('Deluxe', 2, 'Suite')],
     }
-    bed_counts = {'ICU': 5, 'General': 8, 'Shared': 10, 'Single': 6, 'Deluxe': 3}
+    bed_counts = {'ICU': 5, 'General': 8, 'Single': 6, 'Deluxe': 3}
     status_weights = ['Available'] * 5 + ['Occupied'] * 4 + ['Maintenance']
 
     dept_rows = {row['name']: row['id'] for row in conn.execute("SELECT id,name FROM departments")}
@@ -295,6 +301,37 @@ def _seed(conn):
         conn.execute("""INSERT OR IGNORE INTO beds
             (bed_code, bed_type, department_id, floor, ward, status, patient_id, notes)
             VALUES (?,?,?,?,?,?,?,?)""", b)
+
+    # ── Shared Rooms (multi-bed rooms with 2-6 capacity) ──
+    shared_depts = [
+        ('General Ward', 3, 'Ward A'),
+        ('Pediatrics', 2, 'Peds Ward'),
+    ]
+    room_capacities = [2, 3, 4, 6, 2, 3]  # variety of room sizes
+    room_idx = 0
+    for dept_name, floor, ward in shared_depts:
+        dept_id = dept_rows.get(dept_name, 1)
+        for r in range(1, 4):  # 3 rooms per dept
+            cap = room_capacities[room_idx % len(room_capacities)]
+            room_num = f"{dept_name[:2].upper()}-R{r:02d}"
+            for bed_i in range(1, cap + 1):
+                code = f"{room_num}-B{bed_i}"
+                st = random.choice(status_weights)
+                conn.execute("""INSERT OR IGNORE INTO beds
+                    (bed_code, bed_type, department_id, floor, ward, room_number, capacity, status)
+                    VALUES (?,?,?,?,?,?,?,?)""",
+                    (code, 'Shared', dept_id, floor, ward, room_num, cap, st))
+            room_idx += 1
+
+    # ── Emergency Beds (separate, reserved for General ward overflow) ──
+    emergency_dept_id = dept_rows.get('Emergency', 1)
+    for i in range(1, 11):
+        code = f"EM-{i:02d}"
+        conn.execute("""INSERT OR IGNORE INTO beds
+            (bed_code, bed_type, department_id, floor, ward, status, patient_id, notes)
+            VALUES (?,?,?,?,?,?,?,?)""",
+            (code, 'Emergency', emergency_dept_id, 1, 'Emergency Bay', 'Available', None,
+             'Emergency overflow bed — activates when General ward beds are full'))
 
     # ── Patients (seeded first so we can link) ──
     patient_data = [
@@ -545,10 +582,36 @@ def get_bed_summary():
                SUM(CASE WHEN status='Occupied' THEN 1 ELSE 0 END) as occupied,
                SUM(CASE WHEN status='Maintenance' THEN 1 ELSE 0 END) as maintenance,
                SUM(CASE WHEN status='Reserved' THEN 1 ELSE 0 END) as reserved
-        FROM beds GROUP BY bed_type ORDER BY bed_type
+        FROM beds WHERE bed_type != 'Emergency'
+        GROUP BY bed_type ORDER BY bed_type
     """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_emergency_bed_summary():
+    """Get summary stats for Emergency beds specifically."""
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT COUNT(*) as total,
+               SUM(CASE WHEN status='Available' THEN 1 ELSE 0 END) as available,
+               SUM(CASE WHEN status='Occupied' THEN 1 ELSE 0 END) as occupied,
+               SUM(CASE WHEN status='Maintenance' THEN 1 ELSE 0 END) as maintenance
+        FROM beds WHERE bed_type='Emergency'
+    """).fetchone()
+    conn.close()
+    return dict(row) if row else {'total': 0, 'available': 0, 'occupied': 0, 'maintenance': 0}
+
+
+def are_general_beds_full():
+    """Check if all General ward beds are occupied/unavailable."""
+    conn = get_conn()
+    row = conn.execute("""
+        SELECT SUM(CASE WHEN status='Available' THEN 1 ELSE 0 END) as available
+        FROM beds WHERE bed_type='General'
+    """).fetchone()
+    conn.close()
+    return (row['available'] or 0) == 0
 
 
 def get_shared_room_summary():
@@ -903,6 +966,121 @@ def get_staff_summary():
     """).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def add_staff(name, role, department_id, shift, status, phone, email):
+    conn = get_conn()
+    conn.execute("""INSERT INTO staff (name,role,department_id,shift,status,phone,email)
+                    VALUES (?,?,?,?,?,?,?)""",
+                 (name, role, department_id, shift, status, phone, email))
+    conn.commit()
+    conn.close()
+
+
+def update_staff(sid, name, role, department_id, shift, status, phone, email):
+    conn = get_conn()
+    conn.execute("""UPDATE staff SET name=?,role=?,department_id=?,shift=?,status=?,phone=?,email=?
+                    WHERE id=?""",
+                 (name, role, department_id, shift, status, phone, email, sid))
+    conn.commit()
+    conn.close()
+
+
+def delete_staff(sid):
+    conn = get_conn()
+    conn.execute("DELETE FROM staff WHERE id=?", (sid,))
+    conn.commit()
+    conn.close()
+
+
+def generate_real_alerts():
+    """Scan resources and patients to produce real-time alerts."""
+    alerts = []
+    conn = get_conn()
+
+    # 1. Critical patients
+    crit_patients = conn.execute(
+        "SELECT name, condition, department_id FROM patients WHERE severity='Critical' AND status='Admitted'"
+    ).fetchall()
+    for p in crit_patients:
+        dept = conn.execute("SELECT name FROM departments WHERE id=?", (p['department_id'],)).fetchone()
+        dept_name = dept['name'] if dept else None
+        alerts.append({
+            'type': 'Patient', 'severity': 'CRITICAL',
+            'message': f"Critical patient: {p['name']} — {p['condition']}",
+            'department': dept_name, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+        })
+
+    # 2. Blood inventory critical
+    blood_crit = conn.execute(
+        "SELECT blood_group, component, units_available FROM blood_inventory WHERE units_available < 5"
+    ).fetchall()
+    for b in blood_crit:
+        alerts.append({
+            'type': 'Resource', 'severity': 'CRITICAL',
+            'message': f"Blood {b['blood_group']} {b['component']}: only {b['units_available']} units left",
+            'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+        })
+
+    # 3. Bed type at capacity
+    bed_types = conn.execute("""
+        SELECT bed_type, COUNT(*) as total,
+               SUM(CASE WHEN status='Available' THEN 1 ELSE 0 END) as available
+        FROM beds GROUP BY bed_type
+    """).fetchall()
+    for bt in bed_types:
+        if (bt['available'] or 0) == 0:
+            alerts.append({
+                'type': 'Resource', 'severity': 'CRITICAL',
+                'message': f"{bt['bed_type']} beds fully occupied — {bt['total']} total, 0 available",
+                'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+            })
+        elif (bt['available'] or 0) <= 2:
+            alerts.append({
+                'type': 'Resource', 'severity': 'WARNING',
+                'message': f"{bt['bed_type']} beds critically low — only {bt['available']} of {bt['total']} available",
+                'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+            })
+
+    # 4. Equipment in maintenance
+    maint_equip = conn.execute(
+        "SELECT asset_code, equipment_type FROM life_support WHERE status='Maintenance'"
+    ).fetchall()
+    for eq in maint_equip:
+        alerts.append({
+            'type': 'Resource', 'severity': 'WARNING',
+            'message': f"{eq['equipment_type']} {eq['asset_code']} is under maintenance",
+            'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+        })
+
+    # 5. Missing/maintenance RFID equipment
+    rfid_issues = conn.execute(
+        "SELECT asset_code, equipment_type, status FROM mobile_equipment WHERE status IN ('Maintenance','Missing')"
+    ).fetchall()
+    for eq in rfid_issues:
+        sev = 'CRITICAL' if eq['status'] == 'Missing' else 'WARNING'
+        alerts.append({
+            'type': 'Resource', 'severity': sev,
+            'message': f"{eq['equipment_type']} {eq['asset_code']} — {eq['status']}",
+            'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+        })
+
+    # 6. Beds in maintenance
+    maint_beds = conn.execute(
+        "SELECT bed_code, bed_type FROM beds WHERE status='Maintenance'"
+    ).fetchall()
+    if len(maint_beds) > 3:
+        alerts.append({
+            'type': 'Resource', 'severity': 'WARNING',
+            'message': f"{len(maint_beds)} beds currently under maintenance",
+            'department': None, 'id': None, 'acknowledged': 0, 'created_at': 'Live'
+        })
+
+    conn.close()
+    # Sort: CRITICAL first, then WARNING, then INFO
+    order = {'CRITICAL': 0, 'WARNING': 1, 'INFO': 2}
+    alerts.sort(key=lambda a: order.get(a['severity'], 3))
+    return alerts
 
 
 # ── Patients ──

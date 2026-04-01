@@ -11,7 +11,7 @@ from database import (
     create_db, seed_data,
     get_departments,
     # Beds
-    get_beds, get_bed, get_bed_summary, get_shared_room_summary, update_bed_status, add_bed, delete_bed,
+    get_beds, get_bed, get_bed_summary, get_emergency_bed_summary, are_general_beds_full, update_bed_status, add_bed, delete_bed,
     # Blood
     get_blood_inventory, get_blood_summary, add_blood_inventory, update_blood_inventory, delete_blood_inventory, reserve_blood_units, release_blood_units,
     # Mobile / RFID
@@ -21,11 +21,11 @@ from database import (
     # Legacy resources
     get_resources, update_resource, get_resource_summary, add_resource, delete_resource,
     # Staff
-    get_staff, get_staff_on_duty, get_staff_summary,
+    get_staff, get_staff_on_duty, get_staff_summary, add_staff, update_staff, delete_staff,
     # Patients
     get_patients, add_patient, discharge_patient, get_patient_counts, update_patient, delete_patient,
     # Alerts
-    get_alerts, add_alert, acknowledge_alert, get_alert_counts,
+    get_alerts, add_alert, acknowledge_alert, get_alert_counts, generate_real_alerts,
     # Data
     insert_hospital_data, get_setting, set_setting, migrate_schema,
 )
@@ -137,10 +137,14 @@ def resources_page():
     ls_summ     = get_life_support_summary()
     ls_items    = get_life_support()
 
-    # Group beds by type
+    # Group beds by type (exclude Emergency — they get their own section)
     bed_by_type = {}
+    emergency_beds = []
     for b in beds:
-        bed_by_type.setdefault(b['bed_type'], []).append(b)
+        if b['bed_type'] == 'Emergency':
+            emergency_beds.append(b)
+        else:
+            bed_by_type.setdefault(b['bed_type'], []).append(b)
 
     # Group blood by group
     blood_by_group = {}
@@ -157,16 +161,19 @@ def resources_page():
     for item in mobiles:
         mob_by_type.setdefault(item['equipment_type'], []).append(item)
 
-    shared_rooms = get_shared_room_summary()
+    # Emergency bed data
+    em_summ = get_emergency_bed_summary()
+    general_full = are_general_beds_full()
 
     return render_template('resources.html',
         page='resources', pa=_pa(),
         bed_summ=bed_summ, bed_by_type=bed_by_type,
-        shared_rooms=shared_rooms,
+        emergency_beds=emergency_beds, em_summ=em_summ, general_full=general_full,
         blood_summ=blood_summ, blood_by_group=blood_by_group,
         mobile_summ=mobile_summ, mob_by_type=mob_by_type,
         ls_summ=ls_summ, ls_by_type=ls_by_type,
         legacy_resources=get_resources(),
+        depts=get_departments(),
     )
 
 
@@ -515,20 +522,15 @@ def predictions_page():
 # ─────────────────────────────────────
 @app.route('/alerts')
 def alerts_page():
-    ac = get_alert_counts()
+    live_alerts = generate_real_alerts()
+    total = len(live_alerts)
+    pending = sum(1 for a in live_alerts if not a.get('acknowledged'))
+    critical = sum(1 for a in live_alerts if a['severity'] == 'CRITICAL' and not a.get('acknowledged'))
+    ac = {'total': total, 'pending': pending, 'critical': critical}
     return render_template('alerts.html',
-        page='alerts', pa=ac.get('pending', 0),
-        alerts=get_alerts(), ac=ac,
+        page='alerts', pa=pending,
+        alerts=live_alerts, ac=ac,
     )
-
-
-@app.route('/alerts/acknowledge/<int:aid>', methods=['POST'])
-def alert_ack(aid):
-    acknowledge_alert(aid)
-    flash('Alert acknowledged.', 'success')
-    if request.headers.get('X-Requested-With'):
-        return ('', 200)
-    return redirect(url_for('alerts_page'))
 
 
 # ─────────────────────────────────────
@@ -620,6 +622,54 @@ def settings_page():
         page='settings', pa=_pa(),
         depts=get_departments(), staff=get_staff(),
     )
+
+
+@app.route('/settings/staff/add', methods=['POST'])
+def staff_add():
+    add_staff(
+        request.form['name'], request.form['role'],
+        int(request.form['department_id']), request.form['shift'],
+        request.form['status'], request.form.get('phone',''),
+        request.form.get('email','')
+    )
+    flash('Staff member added.', 'success')
+    return redirect(url_for('settings_page'))
+
+
+@app.route('/settings/staff/<int:sid>/update', methods=['POST'])
+def staff_update(sid):
+    update_staff(sid,
+        request.form['name'], request.form['role'],
+        int(request.form['department_id']), request.form['shift'],
+        request.form['status'], request.form.get('phone',''),
+        request.form.get('email','')
+    )
+    flash('Staff member updated.', 'success')
+    return redirect(url_for('settings_page'))
+
+
+@app.route('/settings/staff/<int:sid>/delete', methods=['POST'])
+def staff_delete(sid):
+    delete_staff(sid)
+    flash('Staff member removed.', 'success')
+    return redirect(url_for('settings_page'))
+
+
+@app.route('/resources/bed/<int:bed_id>/toggle_maintenance', methods=['POST'])
+def bed_toggle_maintenance(bed_id):
+    bed = get_bed(bed_id)
+    if not bed:
+        flash('Bed not found.', 'error')
+        return redirect(url_for('resources_page'))
+    if bed['status'] == 'Maintenance':
+        update_bed_status(bed_id, 'Available')
+        flash(f"{bed['bed_code']} restored to Available.", 'success')
+    elif bed['status'] == 'Available':
+        update_bed_status(bed_id, 'Maintenance')
+        flash(f"{bed['bed_code']} set to Maintenance.", 'warning')
+    else:
+        flash(f"Cannot toggle: bed is currently {bed['status']}.", 'error')
+    return redirect(url_for('resources_page'))
 
 
 # ─────────────────────────────────────

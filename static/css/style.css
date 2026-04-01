@@ -415,8 +415,8 @@ input, select, textarea { font-family: inherit; }
   background: var(--bg-card);
   border: 1px solid var(--border-light);
   border-radius: var(--radius);
-  width: 90%; max-width: 520px;
-  max-height: 90vh;
+  width: 90%; max-width: 560px;
+  max-height: 85vh;
   display: flex; flex-direction: column;
   box-shadow: var(--shadow-lg);
   animation: modalIn 0.25s ease;
@@ -433,7 +433,7 @@ input, select, textarea { font-family: inherit; }
   transition: color 0.2s;
 }
 .modal-x:hover { color: var(--text); }
-.modal-bd { padding: 20px; overflow-y: auto; flex: 1; }
+.modal-bd { padding: 16px 20px; overflow-y: auto; flex: 1; min-height: 0; }
 .modal-ft {
   display: flex; gap: 10px; justify-content: flex-end;
   padding: 14px 20px;
