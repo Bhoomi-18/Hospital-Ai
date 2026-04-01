@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Alerts{% endblock %}
+{% block header %}Alert Center{% endblock %}
+
+{% block content %}
+<!-- ── Count Cards ── -->
+<div class="metrics">
+  <div class="m-card red">
+    <div class="m-top"><span class="m-label">Pending</span><span class="m-icon">⏳</span></div>
+    <div class="m-val">{{ ac.pending or 0 }}</div>
+    <div class="m-sub bad">requires action</div>
+  </div>
+  <div class="m-card orange">
+    <div class="m-top"><span class="m-label">Critical</span><span class="m-icon">🔴</span></div>
+    <div class="m-val">{{ ac.critical or 0 }}</div>
+  </div>
+  <div class="m-card green">
+    <div class="m-top"><span class="m-label">Resolved</span><span class="m-icon">✅</span></div>
+    <div class="m-val">{{ (ac.total or 0) - (ac.pending or 0) }}</div>
+  </div>
+  <div class="m-card blue">
+    <div class="m-top"><span class="m-label">Total</span><span class="m-icon">📋</span></div>
+    <div class="m-val">{{ ac.total or 0 }}</div>
+  </div>
+</div>
+
+<!-- ── Alert List ── -->
+<div class="card">
+  <div class="card-h">
+    <span class="card-t">🚨 All Alerts</span>
+    {% if ac.pending > 0 %}
+    <span class="badge badge-d">{{ ac.pending }} pending</span>
+    {% endif %}
+  </div>
+  <div class="card-b np">
+    {% for a in alerts %}
+    <div class="al {{ 'acked' if a.acknowledged }}">
+      <span
+        class="al-dot {{ 'cr' if a.severity=='CRITICAL' else 'wr' if a.severity=='WARNING' else 'inf' if a.severity=='INFO' else 'nr' }}"></span>
+      <div class="al-c">
+        <div class="al-msg">{{ a.message }}</div>
+        <div class="al-meta">
+          {{ a.severity }} · {{ a.type }}
+          {% if a.department %} · {{ a.department }}{% endif %}
+          · {{ a.created_at }}
+          {% if a.acknowledged %} · ✓ Acknowledged{% endif %}
+        </div>
+      </div>
+      <div>
+        {% if not a.acknowledged %}
+        <button class="btn btn-sm btn-s" onclick="ackAlert({{ a.id }}, this)">Acknowledge</button>
+        {% else %}
+        <span class="badge badge-s">✓ Done</span>
+        {% endif %}
+      </div>
+    </div>
+    {% else %}
+    <div class="empty">
+      <div class="ei">✅</div>
+      <h3>No alerts</h3>
+      <p>All systems operational</p>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

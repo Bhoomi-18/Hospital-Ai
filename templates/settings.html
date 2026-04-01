@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block header %}Settings & Data{% endblock %}
+
+{% block content %}
+<div class="charts-row">
+  <!-- ── Add Operational Data ── -->
+  <div class="card">
+    <div class="card-h"><span class="card-t">➕ Add Operational Snapshot</span></div>
+    <div class="card-b">
+      <form method="POST" action="/settings">
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Hour (0–23)</label>
+            <input type="number" name="hour" class="fc" value="12" min="0" max="23">
+          </div>
+          <div class="fg">
+            <label class="fl">Patients Count</label>
+            <input type="number" name="patients" class="fc" value="50" min="0">
+          </div>
+        </div>
+        <div class="fr">
+          <div class="fg">
+            <label class="fl">Beds Available</label>
+            <input type="number" name="beds" class="fc" value="20" min="0">
+          </div>
+          <div class="fg">
+            <label class="fl">Staff on Duty</label>
+            <input type="number" name="staff" class="fc" value="15" min="0">
+          </div>
+        </div>
+        <div class="fg">
+          <label class="fl">Theme</label>
+          <select name="theme" class="fc">
+            <option value="dark" {% if theme=='dark' %}selected{% endif %}>Dark</option>
+            <option value="light" {% if theme=='light' %}selected{% endif %}>Light</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-p btn-full">💾 Save Snapshot</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- ── Departments ── -->
+  <div class="card">
+    <div class="card-h">
+      <span class="card-t">🏥 Departments</span>
+      <span class="badge badge-p">{{ depts | length }}</span>
+    </div>
+    <div class="card-b np">
+      <table class="dt">
+        <thead>
+          <tr>
+            <th>Icon</th>
+            <th>Name</th>
+            <th>Floor</th>
+            <th>Total Beds</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in depts %}
+          <tr>
+            <td>{{ d.icon }}</td>
+            <td style="font-weight:600">{{ d.name }}</td>
+            <td>{{ d.floor }}</td>
+            <td>{{ d.total_beds }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ── Staff Roster ── -->
+<div class="card">
+  <div class="card-h">
+    <span class="card-t">👨‍⚕️ Staff Roster</span>
+    <span class="badge badge-p">{{ staff | length }} staff</span>
+  </div>
+  <div class="card-b np">
+    <table class="dt">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Role</th>
+          <th>Department</th>
+          <th>Shift</th>
+          <th>Status</th>
+          <th>Contact</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in staff %}
+        <tr>
+          <td style="font-weight:600">{{ s.name }}</td>
+          <td>{{ s.role }}</td>
+          <td>{{ s.department_name or '—' }}</td>
+          <td>{{ s.shift }}</td>
+          <td>
+            <span class="badge badge-{{ 's' if s.status=='On Duty' else 'w' if s.status=='Off Duty' else 'n' }}">
+              {{ s.status }}
+            </span>
+          </td>
+          <td style="font-size:11px;color:var(--text3)">{{ s.email }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
